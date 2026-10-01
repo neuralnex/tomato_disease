@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sqlalchemy
+transformers
+torch
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+pydantic
+pydantic-settings
