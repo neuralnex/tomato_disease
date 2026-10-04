@@ -1,8 +1,10 @@
 fastapi
 uvicorn
 sqlalchemy
-transformers
-torch
+transformers==4.41.2
+tokenizers==0.19.1
+torch==2.14.1+cpu
+pillow
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]

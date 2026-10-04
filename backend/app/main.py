@@ -2,8 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api import auth, classification
 from .db.session import init_db
+from .ml.predictor import TomatoPredictor
 
 app = FastAPI(title="Tomato Disease Classifier API")
+predictor = TomatoPredictor()
 
 # CORS for React frontend
 app.add_middleware(
@@ -14,10 +16,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Database
+# Initialize Database and model
 @app.on_event("startup")
 def on_startup():
     init_db()
+    try:
+        predictor._ensure_loaded()
+    except Exception as e:
+        print(f"Model startup load failed: {e}")
 
 # Routes
 app.include_router(auth.router)

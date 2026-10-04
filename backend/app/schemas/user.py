@@ -12,10 +12,7 @@ class UserOut(UserBase):
     id: int
     created_at: datetime
 
-    class Config:
-        # Support both pydantic v1 (`orm_mode`) and v2 (`from_attributes`)
-        orm_mode = True
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 class Token(BaseModel):
     access_token: str
@@ -31,6 +28,4 @@ class ClassificationOut(ClassificationBase):
     id: int
     user_id: int
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = {"from_attributes": True}
