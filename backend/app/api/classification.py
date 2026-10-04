@@ -5,7 +5,7 @@ import os
 import uuid
 from ..db.models import Classification, User
 from ..db.session import SessionLocal
-from ..api.auth import get_current_user, get_db
+from ..api.auth import get_db
 from ..ml.predictor import TomatoPredictor
 from ..schemas.user import ClassificationOut
 router = APIRouter(prefix="/classify", tags=["classification"])
@@ -14,13 +14,25 @@ predictor = TomatoPredictor()
 UPLOAD_DIR = "backend/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+
+def get_or_create_guest_user(db: Session) -> User:
+    guest_username = "guest"
+    guest_user = db.query(User).filter(User.username == guest_username).first()
+    if guest_user is None:
+        guest_user = User(username=guest_username, hashed_password="guest")
+        db.add(guest_user)
+        db.commit()
+        db.refresh(guest_user)
+    return guest_user
+
+
 @router.post("/predict")
 async def predict_image(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Save uploaded file
+    current_user = get_or_create_guest_user(db)
+
     file_ext = os.path.splitext(file.filename)[1]
     filename = f"{uuid.uuid4()}{file_ext}"
     file_path = os.path.join(UPLOAD_DIR, filename)
@@ -29,12 +41,10 @@ async def predict_image(
         buffer.write(await file.read())
 
     try:
-        # Model inference
         result = predictor.predict(file_path)
         label = result["label"]
         confidence = result["score"]
 
-        # Save to DB
         classification = Classification(
             user_id=current_user.id,
             image_path=file_path,
@@ -51,17 +61,18 @@ async def predict_image(
             "image_path": file_path
         }
     except Exception as e:
-        # Cleanup file on error
         if os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 @router.get("/history", response_model=List[ClassificationOut])
-def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_history(db: Session = Depends(get_db)):
+    current_user = get_or_create_guest_user(db)
     return db.query(Classification).filter(Classification.user_id == current_user.id).order_by(Classification.created_at.desc()).all()
 
 @router.get("/stats")
-def get_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_stats(db: Session = Depends(get_db)):
+    current_user = get_or_create_guest_user(db)
     from sqlalchemy import func
 
     stats = db.query(

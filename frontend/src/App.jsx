@@ -1,143 +1,194 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 
-export default function App(){
-  const [message, setMessage] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [token, setToken] = useState(localStorage.getItem('token')||'')
+const API_BASE = 'http://127.0.0.1:8000'
+
+export default function App() {
+  const [message, setMessage] = useState('Loading model status...')
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [prediction, setPrediction] = useState(null)
   const [history, setHistory] = useState([])
   const [uploading, setUploading] = useState(false)
-  const fileRef = useRef()
+  const fileInputRef = useRef(null)
 
-  useEffect(()=>{
-    fetch('http://127.0.0.1:8000/')
-      .then(r=>r.json())
-      .then(j=>setMessage(j.message))
-      .catch(()=>setMessage('Backend unreachable'))
-  },[])
+  useEffect(() => {
+    fetch(`${API_BASE}/`)
+      .then((r) => r.json())
+      .then((j) => setMessage(j.message))
+      .catch(() => setMessage('Backend unavailable. Start the API server to run predictions.'))
 
-  function saveToken(t){
-    setToken(t)
-    localStorage.setItem('token', t)
-  }
+    loadHistory()
+  }, [])
 
-  async function signup(e){
-    e.preventDefault()
-    try{
-      const res = await fetch('http://127.0.0.1:8000/auth/signup',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({username, password})
-      })
-      if(!res.ok) throw new Error(await res.text())
-      alert('Signup successful — please login')
-    }catch(err){
-      alert('Signup failed: '+err.message)
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
+
+  async function loadHistory() {
+    try {
+      const res = await fetch(`${API_BASE}/classify/history`)
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setHistory(data)
+    } catch (err) {
+      console.error('History load failed:', err)
     }
   }
 
-  async function login(e){
-    e.preventDefault()
-    try{
-      const form = new URLSearchParams()
-      form.append('username', username)
-      form.append('password', password)
-      const res = await fetch('http://127.0.0.1:8000/auth/login',{
-        method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body: form.toString()
-      })
-      if(!res.ok) throw new Error(await res.text())
-      const j = await res.json()
-      saveToken(j.access_token)
-      alert('Login OK')
-    }catch(err){
-      alert('Login failed: '+err.message)
-    }
+  function handleFileChange(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setSelectedFile(file)
+    setPreviewUrl(URL.createObjectURL(file))
   }
 
-  async function doUpload(e){
-    e.preventDefault()
-    const f = fileRef.current.files[0]
-    if(!f){ alert('Select a file'); return }
-    if(!token){ alert('Login first'); return }
+  async function handlePredict(event) {
+    event.preventDefault()
+
+    if (!selectedFile) {
+      alert('Choose a tomato leaf image first.')
+      return
+    }
+
     setUploading(true)
-    try{
-      const fd = new FormData()
-      fd.append('file', f)
-      const res = await fetch('http://127.0.0.1:8000/classify/predict',{
-        method:'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: fd
-      })
-      const text = await res.text()
-      if(!res.ok) throw new Error(text)
-      const j = JSON.parse(text)
-      alert(`Prediction: ${j.label} (${(j.confidence*100).toFixed(1)}%)`)
-      await loadHistory()
-    }catch(err){
-      alert('Prediction failed: '+err.message)
-    }finally{ setUploading(false) }
-  }
 
-  async function loadHistory(){
-    if(!token) return setHistory([])
-    try{
-      const res = await fetch('http://127.0.0.1:8000/classify/history',{ headers: { 'Authorization': `Bearer ${token}` } })
-      if(!res.ok) throw new Error(await res.text())
-      const j = await res.json()
-      setHistory(j)
-    }catch(err){
-      alert('Could not load history: '+err.message)
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+
+      const res = await fetch(`${API_BASE}/classify/predict`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const text = await res.text()
+      if (!res.ok) throw new Error(text)
+
+      const result = JSON.parse(text)
+      setPrediction(result)
+      await loadHistory()
+    } catch (err) {
+      alert(`Prediction failed: ${err.message}`)
+    } finally {
+      setUploading(false)
     }
   }
 
-  function logout(){
-    saveToken('')
-    localStorage.removeItem('token')
-    setHistory([])
-  }
+  const stats = useMemo(() => {
+    const labels = history.map((item) => item.label)
+    const counts = labels.reduce((acc, label) => {
+      acc[label] = (acc[label] || 0) + 1
+      return acc
+    }, {})
+
+    return Object.entries(counts).map(([label, count]) => ({ label, count }))
+  }, [history])
 
   return (
-    <div style={{fontFamily:'sans-serif',padding:20}}>
-      <h1>Tomato Disease Classifier</h1>
-      <p style={{color:'#444'}}>{message}</p>
+    <div className="app-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Smart agriculture</p>
+          <h1>Tomato Disease Classifier</h1>
+        </div>
+        <div className="status-pill">{message}</div>
+      </header>
 
-      <section style={{marginTop:20}}>
-        <h2>Auth</h2>
-        <form style={{display:'flex',gap:8,alignItems:'center'}} onSubmit={login}>
-          <input placeholder="username" value={username} onChange={e=>setUsername(e.target.value)} />
-          <input placeholder="password" value={password} onChange={e=>setPassword(e.target.value)} type="password" />
-          <button type="submit">Login</button>
-          <button type="button" onClick={signup}>Sign up</button>
-          <button type="button" onClick={logout}>Logout</button>
-        </form>
-      </section>
+      <main className="dashboard">
+        <section className="panel upload-panel">
+          <div className="panel-header">
+            <span className="badge success">Live</span>
+            <h2>Upload leaf image</h2>
+          </div>
 
-      <section style={{marginTop:20}}>
-        <h2>Upload Image</h2>
-        <form onSubmit={doUpload} style={{display:'flex',gap:8,alignItems:'center'}}>
-          <input ref={fileRef} type="file" accept="image/*" />
-          <button type="submit" disabled={uploading}>{uploading? 'Uploading...' : 'Predict'}</button>
-          <button type="button" onClick={loadHistory}>Refresh History</button>
-        </form>
-      </section>
+          <form onSubmit={handlePredict} className="upload-form">
+            <label className="dropzone" htmlFor="image-upload">
+              <input
+                id="image-upload"
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+              />
+              {previewUrl ? (
+                <img src={previewUrl} alt="Selected tomato leaf" className="preview-image" />
+              ) : (
+                <>
+                  <span className="upload-icon">⇪</span>
+                  <strong>Choose an image</strong>
+                  <small>PNG, JPG, WEBP up to your browser limit</small>
+                </>
+              )}
+            </label>
 
-      <section style={{marginTop:20}}>
-        <h2>History</h2>
-        {history.length===0 ? <p>No history yet.</p> : (
-          <table style={{borderCollapse:'collapse'}}>
-            <thead><tr><th>Time</th><th>Label</th><th>Confidence</th></tr></thead>
-            <tbody>
-              {history.map(item=> (
-                <tr key={item.id}>
-                  <td>{new Date(item.created_at).toLocaleString()}</td>
-                  <td>{item.label}</td>
-                  <td>{(item.confidence*100).toFixed(1)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <button type="submit" className="primary-button" disabled={uploading}>
+              {uploading ? 'Analyzing...' : 'Predict disease'}
+            </button>
+          </form>
+        </section>
+
+        <aside className="panel result-panel">
+          <div className="panel-header">
+            <span className="badge neutral">Result</span>
+            <h2>Latest scan</h2>
+          </div>
+
+          {prediction ? (
+            <div className="result-card">
+              <div className="result-header">
+                <span className="result-tag">{prediction.label}</span>
+                <span className="confidence">{(prediction.confidence * 100).toFixed(1)}%</span>
+              </div>
+              <p className="result-summary">
+                Confidence score for the detected tomato condition.
+              </p>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>No prediction yet.</p>
+              <small>Upload a leaf photo to start detecting disease.</small>
+            </div>
+          )}
+
+          <div className="mini-stats">
+            <div>
+              <strong>{history.length}</strong>
+              <span>Scans</span>
+            </div>
+            <div>
+              <strong>{stats.length}</strong>
+              <span>Labels</span>
+            </div>
+          </div>
+        </aside>
+      </main>
+
+      <section className="panel history-panel">
+        <div className="panel-header">
+          <span className="badge neutral">History</span>
+          <h2>Recent results</h2>
+        </div>
+
+        {history.length === 0 ? (
+          <div className="empty-state compact">
+            <p>No saved history yet.</p>
+          </div>
+        ) : (
+          <div className="history-list">
+            {history.slice(0, 6).map((item) => (
+              <div key={item.id} className="history-item">
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>{new Date(item.created_at).toLocaleString()}</small>
+                </div>
+                <span>{(item.confidence * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
         )}
       </section>
     </div>
